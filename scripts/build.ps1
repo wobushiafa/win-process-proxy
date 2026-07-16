@@ -24,6 +24,7 @@ if (Test-Path -LiteralPath $OutputDirectory) {
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 
 $nativeProject = Join-Path $root 'src\WinProcessProxy.Native\WinProcessProxy.Native.vcxproj'
+$nativeTestProject = Join-Path $root 'tests\WinProcessProxy.Native.Tests\WinProcessProxy.Native.Tests.vcxproj'
 $serviceProject = Join-Path $root 'src\WinProcessProxy.Service\WinProcessProxy.Service.csproj'
 $testProject = Join-Path $root 'tests\WinProcessProxy.Service.Tests\WinProcessProxy.Service.Tests.csproj'
 
@@ -57,6 +58,13 @@ if (-not $msbuild) {
 
 & $msbuild $nativeProject /restore /m /p:Configuration=$Configuration /p:Platform=x64
 if ($LASTEXITCODE -ne 0) { throw 'Native build failed.' }
+
+& $msbuild $nativeTestProject /restore /m /p:Configuration=$Configuration /p:Platform=x64
+if ($LASTEXITCODE -ne 0) { throw 'Native test build failed.' }
+
+$nativeTestExecutable = Join-Path (Split-Path $nativeTestProject) "bin\$Configuration\WinProcessProxy.Native.Tests.exe"
+& $nativeTestExecutable
+if ($LASTEXITCODE -ne 0) { throw 'Native tests failed.' }
 
 & dotnet test $testProject --configuration $Configuration
 if ($LASTEXITCODE -ne 0) { throw 'Managed tests failed.' }

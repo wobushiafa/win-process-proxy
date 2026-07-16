@@ -14,13 +14,15 @@ namespace SocksHelper
 	public:
 		~TCP();
 
+		void Close();
+		void ShutdownSend();
 		bool Connect(PSOCKADDR_IN6 target);
 		bool Connect(const string& host, USHORT port);
 
 		int Send(const char* buffer, int length);
 		int Read(char* buffer, int length);
 
-		SOCKET tcpSocket = INVALID_SOCKET;
+		atomic<SOCKET> tcpSocket = INVALID_SOCKET;
 	} *PTCP;
 
 	typedef class UDP

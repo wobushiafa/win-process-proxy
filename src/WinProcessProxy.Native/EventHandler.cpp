@@ -7,6 +7,7 @@ extern bool filterParent;
 extern bool filterTCP;
 extern bool filterUDP;
 extern bool filterDNS;
+extern bool dnsOnly;
 
 extern vector<wstring> bypassList;
 extern vector<wstring> handleList;
@@ -26,16 +27,6 @@ set<ENDPOINT_ID> proxiedTcpEndpoints;
 
 atomic_ullong UP = { 0 };
 atomic_ullong DL = { 0 };
-
-enum AIO_LOG_EVENT
-{
-	AIO_LOG_APPLICATION = 1,
-	AIO_LOG_TCP_OPEN,
-	AIO_LOG_TCP_CLOSE,
-	AIO_LOG_UDP_OPEN,
-	AIO_LOG_UDP_CLOSE,
-	AIO_LOG_DNS
-};
 
 wstring ConvertIP(PSOCKADDR addr)
 {
@@ -259,7 +250,7 @@ void tcpConnectRequest(ENDPOINT_ID id, PNF_TCP_CONN_INFO info)
 		addr->sin6_port = tcpListen;
 	}
 
-	TCPHandler::CreateHandler(client, remote);
+	TCPHandler::CreateHandler(client, remote, info->processId);
 	LogProxiedApplication(info->processId);
 	{
 		lock_guard<mutex> lock(proxyLogLock);
@@ -330,10 +321,9 @@ void udpCreated(ENDPOINT_ID id, PNF_UDP_CONN_INFO info)
 		return;
 	}
 
-	if (!filterUDP)
+	if (!filterUDP && !filterDNS)
 	{
-		if (!filterDNS) nf_udpDisableFiltering(id);
-
+		nf_udpDisableFiltering(id);
 		return;
 	}
 
@@ -344,19 +334,23 @@ void udpCreated(ENDPOINT_ID id, PNF_UDP_CONN_INFO info)
 		return;
 	}
 
-	if (!checkHandleName(info->processId))
+	bool handleProcess = checkHandleName(info->processId);
+	bool handleSystemDns = filterDNS && dnsOnly;
+	if (!handleProcess && !handleSystemDns)
 	{
 		nf_udpDisableFiltering(id);
 
 		return;
 	}
 
-	LogProxiedApplication(info->processId);
-
 	lock_guard<mutex> lg(udpContextLock);
-	udpContext[id] = make_shared<SocksHelper::UDP>();
 	udpProcessIds[id] = info->processId;
-	LogProxyEvent(AIO_LOG_UDP_OPEN, info->processId, GetProcessName(info->processId));
+	if (handleProcess && filterUDP)
+	{
+		LogProxiedApplication(info->processId);
+		udpContext[id] = make_shared<SocksHelper::UDP>();
+		LogProxyEvent(AIO_LOG_UDP_OPEN, info->processId, GetProcessName(info->processId));
+	}
 }
 
 void udpConnectRequest(ENDPOINT_ID id, PNF_UDP_CONN_REQUEST info)
@@ -448,14 +442,16 @@ void udpClosed(ENDPOINT_ID id, PNF_UDP_CONN_INFO info)
 	UNREFERENCED_PARAMETER(info);
 
 	lock_guard<mutex> lg(udpContextLock);
+	bool proxiedUdp = udpContext.find(id) != udpContext.end();
 	auto process = udpProcessIds.find(id);
 	if (process != udpProcessIds.end())
 	{
-		LogProxyEvent(AIO_LOG_UDP_CLOSE, process->second, GetProcessName(process->second));
+		if (proxiedUdp)
+			LogProxyEvent(AIO_LOG_UDP_CLOSE, process->second, GetProcessName(process->second));
 		udpProcessIds.erase(process);
 	}
 
-	if (udpContext.find(id) != udpContext.end())
+	if (proxiedUdp)
 	{
 		udpContext[id]->Close();
 		udpContext.erase(id);

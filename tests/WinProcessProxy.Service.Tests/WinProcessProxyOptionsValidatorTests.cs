@@ -34,6 +34,33 @@ public sealed class WinProcessProxyOptionsValidatorTests
     }
 
     [Fact]
+    public void Validate_DisabledDns_DoesNotRequireEndpoint()
+    {
+        var options = new WinProcessProxyOptions
+        {
+            Dns = new DnsOptions { Mode = DnsMode.Disabled, Host = "", Port = 0 }
+        };
+
+        var result = _validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public void Validate_InvalidDnsMode_Fails()
+    {
+        var options = new WinProcessProxyOptions
+        {
+            Dns = new DnsOptions { Mode = (DnsMode)999 }
+        };
+
+        var result = _validator.Validate(Options.DefaultName, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, message => message.Contains("Dns:Mode", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Validate_EmptyProcessName_Fails()
     {
         var options = new WinProcessProxyOptions { Processes = [""] };

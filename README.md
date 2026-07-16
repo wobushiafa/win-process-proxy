@@ -67,6 +67,7 @@ C:\Program Files\WinProcessProxy
     "Password": ""
   },
   "Dns": {
+    "Mode": "ProcessOnly",
     "Host": "1.1.1.1",
     "Port": 53
   },
@@ -179,6 +180,7 @@ listeners:
 | `Socks5.Port` | SOCKS5 端口 |
 | `Socks5.Username` | 可选用户名 |
 | `Socks5.Password` | 可选密码 |
+| `Dns.Mode` | `Disabled`、`ProcessOnly` 或 `SystemWide`；旧配置默认为 `ProcessOnly` |
 | `Dns.Host` | 通过代理访问的 DNS 服务器 |
 | `Dns.Port` | DNS 服务器端口，通常是 `53` |
 | `Processes` | 需要代理的 Windows 可执行文件名 |

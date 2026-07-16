@@ -13,6 +13,7 @@ process names that should be proxied:
     "Password": ""
   },
   "Dns": {
+    "Mode": "ProcessOnly",
     "Host": "1.1.1.1",
     "Port": 53
   },
@@ -22,6 +23,15 @@ process names that should be proxied:
   ]
 }
 ```
+
+`Dns.Mode` controls DNS interception independently from general UDP proxying:
+
+- `Disabled` leaves DNS traffic untouched. `Host` and `Port` are ignored.
+- `ProcessOnly` proxies traditional UDP port 53 queries from entries in `Processes`.
+- `SystemWide` proxies traditional UDP port 53 queries from all processes while
+  leaving non-DNS UDP from unlisted processes untouched.
+
+Configurations without `Dns.Mode` remain compatible and use `ProcessOnly`.
 
 `Processes` accepts file names rather than paths or regular expressions.
 Matching is case-insensitive and checks the executable name at the end of the
@@ -35,4 +45,5 @@ restarting the process. A failed reload is logged with `[CONFIG:ERROR]` and the
 last working native configuration is restored.
 
 Runtime log messages use review-friendly tags: `[APP]`, `[TCP:OPEN]`,
-`[TCP:CLOSE]`, `[UDP:OPEN]`, `[UDP:CLOSE]`, `[DNS]`, and `[CONFIG]`.
+`[TCP:CLOSE]`, `[TCP:DOMAIN]`, `[TCP:IP-FALLBACK]`, `[TCP:DOMAIN-FAIL]`,
+`[UDP:OPEN]`, `[UDP:CLOSE]`, `[DNS]`, and `[CONFIG]`.

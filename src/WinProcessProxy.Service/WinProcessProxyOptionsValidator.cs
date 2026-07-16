@@ -13,10 +13,15 @@ internal sealed class WinProcessProxyOptionsValidator : IValidateOptions<WinProc
         if (options.Socks5.Port == 0)
             failures.Add("Socks5:Port must be between 1 and 65535.");
 
-        if (!IPAddress.TryParse(options.Dns.Host, out _))
-            failures.Add("Dns:Host must be an IPv4 or IPv6 address.");
-        if (options.Dns.Port == 0)
-            failures.Add("Dns:Port must be between 1 and 65535.");
+        if (!Enum.IsDefined(options.Dns.Mode))
+            failures.Add("Dns:Mode must be Disabled, ProcessOnly, or SystemWide.");
+        if (options.Dns.Mode != DnsMode.Disabled)
+        {
+            if (!IPAddress.TryParse(options.Dns.Host, out _))
+                failures.Add("Dns:Host must be an IPv4 or IPv6 address.");
+            if (options.Dns.Port == 0)
+                failures.Add("Dns:Port must be between 1 and 65535.");
+        }
 
         for (var index = 0; index < options.Processes.Length; index++)
         {

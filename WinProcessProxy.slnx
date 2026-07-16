@@ -3,7 +3,8 @@
     <Project Path="src/WinProcessProxy.Native/WinProcessProxy.Native.vcxproj" Id="1676def3-fbe4-47d2-93a6-8f85ea2f5b74" />
     <Project Path="src/WinProcessProxy.Service/WinProcessProxy.Service.csproj" />
   </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/WinProcessProxy.Service.Tests/WinProcessProxy.Service.Tests.csproj" />
+	<Folder Name="/tests/">
+		<Project Path="tests/WinProcessProxy.Native.Tests/WinProcessProxy.Native.Tests.vcxproj" Id="e7e57533-9b7d-4d49-9737-7f69526ed4c2" />
+		<Project Path="tests/WinProcessProxy.Service.Tests/WinProcessProxy.Service.Tests.csproj" />
   </Folder>
 </Solution>

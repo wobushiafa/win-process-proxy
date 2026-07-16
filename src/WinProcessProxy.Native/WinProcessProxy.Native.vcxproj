@@ -112,7 +112,8 @@ COPY /Y "$(ProjectDir)static\nfdriver.sys" "$(TargetDir)" &gt; NUL 2&gt;&amp;1</
     <ClCompile Include="IPEventHandler.cpp" />
     <ClCompile Include="WinProcessProxy.cpp" />
     <ClCompile Include="SocksHelper.cpp" />
-    <ClCompile Include="TCPHandler.cpp" />
+	<ClCompile Include="TCPHandler.cpp" />
+	<ClCompile Include="TlsClientHello.cpp" />
     <ClCompile Include="Utils.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -121,7 +122,8 @@ COPY /Y "$(ProjectDir)static\nfdriver.sys" "$(TargetDir)" &gt; NUL 2&gt;&amp;1</
     <ClInclude Include="IPEventHandler.h" />
     <ClInclude Include="Based.h" />
     <ClInclude Include="SocksHelper.h" />
-    <ClInclude Include="TCPHandler.h" />
+	<ClInclude Include="TCPHandler.h" />
+	<ClInclude Include="TlsClientHello.h" />
     <ClInclude Include="Utils.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -53,9 +53,9 @@ internal sealed class WinProcessProxyClient : IDisposable
         Set(WinProcessProxyOption.FilterIcmp, false);
         Set(WinProcessProxyOption.FilterTcp, true);
         Set(WinProcessProxyOption.FilterUdp, true);
-        Set(WinProcessProxyOption.FilterDns, true);
+        Set(WinProcessProxyOption.FilterDns, options.Dns.Mode != DnsMode.Disabled);
         Set(WinProcessProxyOption.IcmpPing, 0U);
-        Set(WinProcessProxyOption.DnsOnly, false);
+        Set(WinProcessProxyOption.DnsOnly, options.Dns.Mode == DnsMode.SystemWide);
         Set(WinProcessProxyOption.DnsProxy, true);
         Set(WinProcessProxyOption.DnsHost, options.Dns.Host);
         Set(WinProcessProxyOption.DnsPort, options.Dns.Port);
@@ -100,6 +100,9 @@ internal sealed class WinProcessProxyClient : IDisposable
                 4 => "[UDP:OPEN]",
                 5 => "[UDP:CLOSE]",
                 6 => "[DNS]",
+                7 => "[TCP:DOMAIN]",
+                8 => "[TCP:IP-FALLBACK]",
+                9 => "[TCP:DOMAIN-FAIL]",
                 _ => "[NATIVE]"
             };
 

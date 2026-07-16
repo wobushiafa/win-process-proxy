@@ -9,7 +9,7 @@ namespace TCPHandler
 	bool INIT();
 	void FREE();
 
-	void CreateHandler(SOCKADDR_IN6 client, SOCKADDR_IN6 remote);
+	void CreateHandler(SOCKADDR_IN6 client, SOCKADDR_IN6 remote, DWORD processId);
 	void DeleteHandler(SOCKADDR_IN6 client);
 
 	void Accept();

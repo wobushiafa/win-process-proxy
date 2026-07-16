@@ -17,6 +17,14 @@ public sealed class Socks5Options
 
 public sealed class DnsOptions
 {
+    public DnsMode Mode { get; set; } = DnsMode.ProcessOnly;
     public string Host { get; set; } = "1.1.1.1";
     public ushort Port { get; set; } = 53;
+}
+
+public enum DnsMode
+{
+    Disabled,
+    ProcessOnly,
+    SystemWide
 }

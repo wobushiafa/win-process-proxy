@@ -1,84 +1,10 @@
 #include "TCPHandler.h"
+#include "EventHandler.h"
+#include "TlsClientHello.h"
+#include "Utils.h"
 
 namespace
 {
-	bool ReadUInt16(const vector<BYTE>& data, size_t offset, USHORT& value)
-	{
-		if (offset + 2 > data.size())
-			return false;
-		value = ((USHORT)data[offset] << 8) | data[offset + 1];
-		return true;
-	}
-
-	string ParseTlsServerName(const vector<BYTE>& data)
-	{
-		USHORT recordLength = 0;
-		if (data.size() < 9 || data[0] != 0x16 || data[5] != 0x01 ||
-			!ReadUInt16(data, 3, recordLength) || data.size() < 5 + recordLength)
-			return {};
-		size_t recordEnd = 5 + recordLength;
-
-		size_t offset = 9 + 2 + 32;
-		if (offset >= recordEnd)
-			return {};
-		offset += 1 + data[offset];
-
-		USHORT length = 0;
-		if (offset + 2 > recordEnd || !ReadUInt16(data, offset, length))
-			return {};
-		offset += 2 + length;
-		if (offset >= recordEnd)
-			return {};
-		offset += 1 + data[offset];
-
-		USHORT extensionsLength = 0;
-		if (offset + 2 > recordEnd || !ReadUInt16(data, offset, extensionsLength))
-			return {};
-		offset += 2;
-		size_t extensionsEnd = offset + extensionsLength;
-		if (extensionsEnd > recordEnd)
-			return {};
-
-		while (offset + 4 <= extensionsEnd)
-		{
-			USHORT type = 0;
-			USHORT extensionLength = 0;
-			ReadUInt16(data, offset, type);
-			ReadUInt16(data, offset + 2, extensionLength);
-			offset += 4;
-			if (offset + extensionLength > extensionsEnd)
-				return {};
-
-			if (type == 0x0000 && extensionLength >= 5)
-			{
-				USHORT listLength = 0;
-				if (!ReadUInt16(data, offset, listLength) || offset + 2 + listLength > extensionsEnd)
-					return {};
-
-				size_t nameOffset = offset + 2;
-				size_t listEnd = nameOffset + listLength;
-				while (nameOffset + 3 <= listEnd)
-				{
-					BYTE nameType = data[nameOffset];
-					USHORT nameLength = 0;
-					if (!ReadUInt16(data, nameOffset + 1, nameLength) || nameOffset + 3 + nameLength > listEnd)
-						return {};
-					if (nameType == 0 && nameLength != 0 && nameLength <= 253)
-					{
-						string host((const char*)data.data() + nameOffset + 3, nameLength);
-						if (host.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-") == string::npos)
-							return host;
-					}
-					nameOffset += 3 + nameLength;
-				}
-			}
-
-			offset += extensionLength;
-		}
-
-		return {};
-	}
-
 	string PeekTlsServerName(SOCKET client)
 	{
 		auto deadline = chrono::steady_clock::now() + chrono::milliseconds(350);
@@ -100,7 +26,7 @@ namespace
 			if (length == 0 || length == SOCKET_ERROR)
 				return {};
 			vector<BYTE> available(data.begin(), data.begin() + length);
-			auto serverName = ParseTlsServerName(available);
+			auto serverName = TlsClientHello::ParseServerName(available);
 			if (!serverName.empty())
 				return serverName;
 
@@ -133,13 +59,31 @@ namespace
 		}
 		return true;
 	}
+
+	wstring FormatAddress(PSOCKADDR_IN6 address)
+	{
+		WCHAR buffer[MAX_PATH] = L"";
+		DWORD length = MAX_PATH;
+		DWORD addressLength = address->sin6_family == AF_INET ? sizeof(SOCKADDR_IN) : sizeof(SOCKADDR_IN6);
+		if (WSAAddressToStringW((PSOCKADDR)address, addressLength, nullptr, buffer, &length) == 0)
+			return buffer;
+		return L"unknown";
+	}
 }
 
 SOCKET tcpSocket = INVALID_SOCKET;
 USHORT tcpListen = 0;
 
 mutex tcpLock;
-map<USHORT, SOCKADDR_IN6> tcpContext;
+mutex activeTcpLock;
+set<SOCKET> activeClients;
+set<SocksHelper::PTCP> activeRemotes;
+struct TCP_CONTEXT
+{
+	SOCKADDR_IN6 target;
+	DWORD processId;
+};
+map<USHORT, TCP_CONTEXT> tcpContext;
 
 bool TCPHandler::INIT()
 {
@@ -224,9 +168,15 @@ void TCPHandler::FREE()
 	tcpListen = 0;
 
 	tcpContext.clear();
+
+	lock_guard<mutex> activeGuard(activeTcpLock);
+	for (auto client : activeClients)
+		shutdown(client, SD_BOTH);
+	for (auto remote : activeRemotes)
+		remote->Close();
 }
 
-void TCPHandler::CreateHandler(SOCKADDR_IN6 client, SOCKADDR_IN6 remote)
+void TCPHandler::CreateHandler(SOCKADDR_IN6 client, SOCKADDR_IN6 remote, DWORD processId)
 {
 	auto lg = lock_guard<mutex>(tcpLock);
 
@@ -234,7 +184,7 @@ void TCPHandler::CreateHandler(SOCKADDR_IN6 client, SOCKADDR_IN6 remote)
 	if (tcpContext.find(id) != tcpContext.end())
 		tcpContext.erase(id);
 
-	tcpContext[id] = remote;
+	tcpContext[id] = { remote, processId };
 }
 
 void TCPHandler::DeleteHandler(SOCKADDR_IN6 client)
@@ -291,19 +241,49 @@ void TCPHandler::Handle(SOCKET client)
 		return;
 	}
 
-	auto target = tcpContext[id];
+	auto context = tcpContext[id];
 	tcpLock.unlock();
+	auto target = context.target;
 
 	auto remote = new SocksHelper::TCP();
+	{
+		lock_guard<mutex> activeGuard(activeTcpLock);
+		activeClients.emplace(client);
+		activeRemotes.emplace(remote);
+	}
 	auto port = (target.sin6_family == AF_INET) ? ((PSOCKADDR_IN)&target)->sin_port : target.sin6_port;
 	auto serverName = (ntohs(port) == 443) ? PeekTlsServerName(client) : string{};
 	if (!serverName.empty())
-		printf("[WinProcessProxy][TCPHandler::Handle] SOCKS5 domain target: %s:%u\n", serverName.c_str(), ntohs(port));
+	{
+		LogProxyEvent(
+			AIO_LOG_TCP_DOMAIN,
+			context.processId,
+			s2ws(serverName) + L":" + to_wstring(ntohs(port)));
+	}
+	else
+	{
+		auto reason = ntohs(port) == 443 ? L" reason=no-sni" : L" reason=non-tls-port";
+		LogProxyEvent(
+			AIO_LOG_TCP_IP_FALLBACK,
+			context.processId,
+			FormatAddress(&target) + reason);
+	}
 	bool connected = serverName.empty() ? remote->Connect(&target) : remote->Connect(serverName, port);
 	if (!connected)
 	{
+		if (!serverName.empty())
+		{
+			LogProxyEvent(
+				AIO_LOG_TCP_DOMAIN_FAIL,
+				context.processId,
+				s2ws(serverName) + L":" + to_wstring(ntohs(port)));
+		}
+		{
+			lock_guard<mutex> activeGuard(activeTcpLock);
+			activeClients.erase(client);
+			activeRemotes.erase(remote);
+		}
 		closesocket(client);
-
 		delete remote;
 		return;
 	}
@@ -313,6 +293,11 @@ void TCPHandler::Handle(SOCKET client)
 	shutdown(client, SD_BOTH);
 	sender.join();
 
+	{
+		lock_guard<mutex> activeGuard(activeTcpLock);
+		activeClients.erase(client);
+		activeRemotes.erase(remote);
+	}
 	closesocket(client);
 	delete remote;
 }
@@ -339,10 +324,21 @@ void TCPHandler::Send(SOCKET client, SocksHelper::PTCP remote)
 	while (tcpSocket != INVALID_SOCKET)
 	{
 		int length = recv(client, buffer, sizeof(buffer), 0);
-		if (length == 0 || length == SOCKET_ERROR)
+		if (length == 0)
+		{
+			remote->ShutdownSend();
 			return;
+		}
+		if (length == SOCKET_ERROR)
+		{
+			remote->Close();
+			return;
+		}
 
 		if (remote->Send(buffer, length) != length)
+		{
+			remote->Close();
 			return;
+		}
 	}
 }
