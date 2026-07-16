@@ -251,6 +251,12 @@ WinProcessProxy.Service.exe
 
 项目自有代码使用 [MIT License](LICENSE)。第三方组件不自动适用本项目的 MIT License，详细信息见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
+## 致谢
+
+感谢 LINUX DO 社区提供交流和反馈平台。
+
+项目交流社区：[LINUX DO](https://linux.do/)
+
 ## 致谢与第三方声明
 
 本项目在按进程代理、Windows 流量转发和工程组织方面参考了 [netchx/netch](https://github.com/netchx/netch) 项目。WinProcessProxy 是独立实现，与 Netch 项目及其维护者不存在隶属或官方关联；相关权利归各自权利人所有。
