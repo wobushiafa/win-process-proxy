@@ -1,10 +1,20 @@
 [CmdletBinding()]
 param(
-    [string]$PublishDirectory = (Join-Path $PSScriptRoot '..\output'),
-    [string]$ServiceName = 'WinProcessProxy'
+    [string]$PublishDirectory,
+    [string]$ServiceName = 'WinProcessProxy',
+    [switch]$Elevated
 )
 
 $ErrorActionPreference = 'Stop'
+$packageExecutable = Join-Path $PSScriptRoot 'WinProcessProxy.Service.exe'
+if ([string]::IsNullOrWhiteSpace($PublishDirectory)) {
+    $PublishDirectory = if (Test-Path -LiteralPath $packageExecutable -PathType Leaf) {
+        $PSScriptRoot
+    }
+    else {
+        Join-Path $PSScriptRoot '..\output'
+    }
+}
 $PublishDirectory = [IO.Path]::GetFullPath($PublishDirectory)
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -14,10 +24,20 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
         '-ExecutionPolicy', 'Bypass',
         '-File', ('"{0}"' -f $PSCommandPath),
         '-PublishDirectory', ('"{0}"' -f $PublishDirectory),
-        '-ServiceName', ('"{0}"' -f $ServiceName)
+        '-ServiceName', ('"{0}"' -f $ServiceName),
+        '-Elevated'
     )
     $elevated = Start-Process -FilePath $powerShell -Verb RunAs -ArgumentList $arguments -Wait -PassThru
     exit $elevated.ExitCode
+}
+
+trap {
+    Write-Host ''
+    Write-Error $_
+    if ($Elevated) {
+        Read-Host 'Installation failed. Press Enter to close this window'
+    }
+    exit 1
 }
 
 $requiredFiles = @(
