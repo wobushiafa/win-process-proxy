@@ -73,7 +73,6 @@ C:\Program Files\WinProcessProxy
   "Processes": [
     "ChatGPT.exe",
     "codex.exe",
-    "Codex.exe",
     "codex-code-mode-host.exe",
     "codex-command-runner.exe",
     "codex-computer-use.exe",
@@ -88,7 +87,7 @@ C:\Program Files\WinProcessProxy
 }
 ```
 
-`Processes` 使用可执行文件名进行匹配，不填写完整路径，匹配时不区分大小写。因此 `codex.exe` 与 `Codex.exe` 实际只需保留一个；示例同时列出二者，是为了完整展示不同安装版本中可能看到的名称。不同版本的进程结构可能变化，可通过任务管理器的“详细信息”页面，或下面的命令确认：
+`Processes` 使用可执行文件名进行匹配，不填写完整路径，匹配时不区分大小写。不同版本的进程结构可能变化，可通过任务管理器的“详细信息”页面，或下面的命令确认：
 
 ```powershell
 Get-Process | Sort-Object ProcessName | Select-Object ProcessName, Id
@@ -124,73 +123,14 @@ Get-Service WinProcessProxy
 .\uninstall-service.ps1
 ```
 
-## Codex 代理示例
+## Codex 与 Antigravity 代理示例
 
-Windows 版 Codex 不只包含一个进程。主界面、Codex CLI、代码模式、扩展宿主和工具运行时可能分别发起网络请求。完整参考配置如下：
-
-```json
-"Processes": [
-  "ChatGPT.exe",
-  "codex.exe",
-  "Codex.exe",
-  "codex-code-mode-host.exe",
-  "codex-command-runner.exe",
-  "codex-computer-use.exe",
-  "extension-host.exe",
-  "node_repl.exe"
-]
-```
-
-本机 Codex 安装包中还包含 `chrome_proxy.exe`、`chrome_pwa_launcher.exe`、`notification_helper.exe`、`elevation_service.exe`、`elevated_tracing_service.exe`、`winpty-agent.exe`、`rg.exe` 和 `tectonic.exe`。这些通常不是 Codex API 的主要网络出口，因此默认不建议加入；若日志或抓包确认某个组件需要联网，再按需补充。
-
-进程匹配不区分大小写，所以 `codex.exe` 和 `Codex.exe` 是同一条匹配规则，实际配置保留任意一个即可。示例不匹配通用的 `node.exe`，避免系统中其他 Node.js 程序被一并代理；Codex 仅保留更明确的 `node_repl.exe`。
-
-如果使用 Clash/Mihomo，建议给 WinProcessProxy 创建一个专用 SOCKS5 Listener，并固定到代理策略组，避免流量进入 SOCKS5 后再次因域名嗅探失败而落入 `DIRECT`：
-
-```yaml
-listeners:
-  - name: codex-fixed
-    type: socks
-    listen: 127.0.0.1
-    port: 10809
-    udp: true
-    users: []
-    proxy: 🚀 节点选择
-```
-
-然后将 WinProcessProxy 的 SOCKS5 地址设为 `127.0.0.1:10809`。`proxy` 的值必须与 Clash/Mihomo 中已有的节点或策略组名称完全一致。
-
-## Antigravity 代理示例
-
-Antigravity 可能由桌面主进程、IDE、CLI、语言服务和 Node.js 扩展宿主共同组成。完整参考配置如下：
-
-```json
-"Processes": [
-  "agy.exe",
-  "language_server.exe",
-  "language_server_windows",
-  "Antigravity.exe",
-  "Antigravity IDE.exe"
-]
-```
-
-本机 Windows 安装目录已确认包含 `Antigravity.exe` 和 `language_server.exe`；其他名称可能来自不同版本、Antigravity IDE 或 CLI。示例不包含通用的 `node.exe`，以免其他 Node.js 应用被一并代理。
-
-如果网络请求由独立的辅助进程发起，也需要把该辅助进程加入数组。可以先运行 Antigravity，再使用以下命令观察相关进程：
-
-```powershell
-Get-CimInstance Win32_Process |
-  Where-Object { $_.Name -match 'antigravity' } |
-  Select-Object Name, ProcessId, ParentProcessId, ExecutablePath
-```
-
-Codex 与 Antigravity 也可以同时代理：
+Codex 和 Antigravity 都可能由桌面主进程、CLI、语言服务、扩展宿主和工具运行时共同发起网络请求。可以使用同一个 `Processes` 列表同时代理：
 
 ```json
 "Processes": [
   "ChatGPT.exe",
   "codex.exe",
-  "Codex.exe",
   "codex-code-mode-host.exe",
   "codex-command-runner.exe",
   "codex-computer-use.exe",
@@ -203,6 +143,33 @@ Codex 与 Antigravity 也可以同时代理：
   "Antigravity IDE.exe"
 ]
 ```
+
+本机 Codex 安装包中还包含 `chrome_proxy.exe`、`chrome_pwa_launcher.exe`、`notification_helper.exe`、`elevation_service.exe`、`elevated_tracing_service.exe`、`winpty-agent.exe`、`rg.exe` 和 `tectonic.exe`。这些通常不是 Codex API 的主要网络出口，因此默认不建议加入；若日志或抓包确认某个组件需要联网，再按需补充。
+
+本机 Antigravity 安装目录已确认包含 `Antigravity.exe` 和 `language_server.exe`；其他名称可能来自不同版本、Antigravity IDE 或 CLI。示例不匹配通用的 `node.exe`，避免其他 Node.js 应用被一并代理；Codex 仅保留更明确的 `node_repl.exe`。
+
+如果网络请求由其他辅助进程发起，也需要将其加入数组。可以在启动对应工具后观察相关进程：
+
+```powershell
+Get-CimInstance Win32_Process |
+  Where-Object { $_.Name -match 'codex|chatgpt|antigravity|agy|language_server' } |
+  Select-Object Name, ProcessId, ParentProcessId, ExecutablePath
+```
+
+如果使用 Clash/Mihomo，建议给 WinProcessProxy 创建一个专用 SOCKS5 Listener，并固定到代理策略组，避免流量进入 SOCKS5 后再次因域名嗅探失败而落入 `DIRECT`：
+
+```yaml
+listeners:
+  - name: development-tools-fixed
+    type: socks
+    listen: 127.0.0.1
+    port: 10809
+    udp: true
+    users: []
+    proxy: 🚀 节点选择
+```
+
+然后将 WinProcessProxy 的 SOCKS5 地址设为 `127.0.0.1:10809`。`proxy` 的值必须与 Clash/Mihomo 中已有的节点或策略组名称完全一致。
 
 ## 配置说明
 
