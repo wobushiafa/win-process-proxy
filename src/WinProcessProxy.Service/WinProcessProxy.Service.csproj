@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableConfigurationBindingGenerator>true</EnableConfigurationBindingGenerator>
+    <AssemblyName>WinProcessProxy.Service</AssemblyName>
+    <RootNamespace>WinProcessProxy.Service</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <NativeOutputDirectory>$(MSBuildProjectDirectory)\..\WinProcessProxy.Native\bin\$(Configuration)</NativeOutputDirectory>
+  </PropertyGroup>
+
+  <Target Name="CopyNativeRuntimeToOutput" AfterTargets="Build"
+          Condition="Exists('$(NativeOutputDirectory)\WinProcessProxy.Native.dll')">
+    <Copy SourceFiles="$(NativeOutputDirectory)\WinProcessProxy.Native.dll;$(NativeOutputDirectory)\nfapi.dll;$(NativeOutputDirectory)\nfdriver.sys"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyNativeRuntimeToPublish" AfterTargets="Publish"
+          Condition="'$(SkipNativeRuntime)' != 'true'">
+    <Error Condition="!Exists('$(NativeOutputDirectory)\WinProcessProxy.Native.dll')"
+           Text="Native runtime not found. Build src/WinProcessProxy.Native/WinProcessProxy.Native.vcxproj for $(Configuration)|x64 first." />
+    <Error Condition="!Exists('$(NativeOutputDirectory)\nfdriver.sys')"
+           Text="NetFilter driver not found. Build src/WinProcessProxy.Native/WinProcessProxy.Native.vcxproj for $(Configuration)|x64 first." />
+    <Copy SourceFiles="$(NativeOutputDirectory)\WinProcessProxy.Native.dll;$(NativeOutputDirectory)\nfapi.dll;$(NativeOutputDirectory)\nfdriver.sys"
+          DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

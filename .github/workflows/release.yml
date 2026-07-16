@@ -1,0 +1,83 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semantic version without the v prefix (for example, 1.0.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        env:
+          MANUAL_VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq 'push') {
+            $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          } else {
+            $version = $env:MANUAL_VERSION -replace '^v', ''
+          }
+
+          if ($version -notmatch '^\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$') {
+            throw "Invalid semantic version: $version"
+          }
+
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=v$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build, test, and publish
+        shell: pwsh
+        run: ./scripts/build.ps1 -Configuration Release -OutputDirectory ./output -Version '${{ steps.version.outputs.version }}'
+
+      - name: Package release
+        id: package
+        shell: pwsh
+        run: |
+          $archive = "WinProcessProxy-${{ steps.version.outputs.version }}-win-x64.zip"
+          Compress-Archive -Path ./output/* -DestinationPath $archive -CompressionLevel Optimal
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+          "$hash  $archive" | Set-Content -LiteralPath "$archive.sha256" -Encoding ascii
+          "archive=$archive" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ steps.version.outputs.tag }}'
+          $archive = '${{ steps.package.outputs.archive }}'
+          $prerelease = '${{ contains(steps.version.outputs.version, '-') }}'
+          $arguments = @(
+            'release', 'create', $tag,
+            $archive, "$archive.sha256",
+            '--title', "WinProcessProxy $tag",
+            '--generate-notes',
+            '--target', $env:GITHUB_SHA
+          )
+          if ($prerelease -eq 'true') {
+            $arguments += '--prerelease'
+          }
+          gh @arguments
