@@ -50,7 +50,7 @@ internal sealed class WinProcessProxyClient : IDisposable
         Set(WinProcessProxyOption.FilterLoopback, false);
         Set(WinProcessProxyOption.FilterIntranet, false);
         Set(WinProcessProxyOption.FilterParent, false);
-        Set(WinProcessProxyOption.FilterIcmp, true);
+        Set(WinProcessProxyOption.FilterIcmp, false);
         Set(WinProcessProxyOption.FilterTcp, true);
         Set(WinProcessProxyOption.FilterUdp, true);
         Set(WinProcessProxyOption.FilterDns, true);
