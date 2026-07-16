@@ -15,6 +15,7 @@ namespace SocksHelper
 		~TCP();
 
 		bool Connect(PSOCKADDR_IN6 target);
+		bool Connect(const string& host, USHORT port);
 
 		int Send(const char* buffer, int length);
 		int Read(char* buffer, int length);

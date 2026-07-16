@@ -7,6 +7,35 @@ extern wstring tgtPort;
 extern string tgtUsername;
 extern string tgtPassword;
 
+namespace
+{
+	bool SendAll(SOCKET socket, const char* buffer, int length)
+	{
+		int sent = 0;
+		while (sent < length)
+		{
+			int result = send(socket, buffer + sent, length - sent, 0);
+			if (result == 0 || result == SOCKET_ERROR)
+				return false;
+			sent += result;
+		}
+		return true;
+	}
+
+	bool ReceiveAll(SOCKET socket, char* buffer, int length)
+	{
+		int received = 0;
+		while (received < length)
+		{
+			int result = recv(socket, buffer + received, length - received, 0);
+			if (result == 0 || result == SOCKET_ERROR)
+				return false;
+			received += result;
+		}
+		return true;
+	}
+}
+
 SOCKET SocksHelper::Connect()
 {
 	auto client = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
@@ -58,18 +87,20 @@ bool SocksHelper::Handshake(SOCKET client)
 	buffer[1] = 0x02;
 	buffer[2] = 0x00;
 	buffer[3] = 0x02;
-	if (send(client, buffer, 4, 0) != 4)
+	if (!SendAll(client, buffer, 4))
 	{
 		printf("[WinProcessProxy][SocksHelper::Handshake] Send client hello failed: %d\n", WSAGetLastError());
 		return false;
 	}
 
 	/* Server Choice */
-	if (recv(client, buffer, 2, 0) != 2)
+	if (!ReceiveAll(client, buffer, 2))
 	{
 		printf("[WinProcessProxy][SocksHelper::Handshake] Receive server choice failed: %d\n", WSAGetLastError());
 		return false;
 	}
+	if ((BYTE)buffer[0] != 0x05)
+		return false;
 
 	/* Authentication */
 	if (buffer[1] == 0x02)
@@ -97,14 +128,14 @@ bool SocksHelper::Handshake(SOCKET client)
 		}
 
 		auto length = 1 + 1 + ulength + 1 + plength;
-		if (send(client, buffer, length, 0) != length)
+		if (!SendAll(client, buffer, length))
 		{
 			printf("[WinProcessProxy][SocksHelper::Handshake] Send authentication request failed: %d\n", WSAGetLastError());
 			return false;
 		}
 
 		/* Server Response */
-		if (recv(client, buffer, 2, 0) != 2)
+		if (!ReceiveAll(client, buffer, 2))
 		{
 			printf("[WinProcessProxy][SocksHelper::Handshake] Receive server response failed: %d\n", WSAGetLastError());
 			return false;
@@ -127,7 +158,7 @@ bool SocksHelper::Handshake(SOCKET client)
 bool SocksHelper::SplitAddr(SOCKET client, PSOCKADDR_IN6 addr)
 {
 	char addrType;
-	if (recv(client, (char*)&addrType, 1, 0) != 1)
+	if (!ReceiveAll(client, (char*)&addrType, 1))
 	{
 		printf("[WinProcessProxy][SocksHelper::SplitAddr] Read address type failed: %d\n", WSAGetLastError());
 		return false;
@@ -138,13 +169,13 @@ bool SocksHelper::SplitAddr(SOCKET client, PSOCKADDR_IN6 addr)
 		auto ipv4 = (PSOCKADDR_IN)addr;
 		ipv4->sin_family = AF_INET;
 
-		if (recv(client, (char*)&ipv4->sin_addr, 4, 0) != 4)
+		if (!ReceiveAll(client, (char*)&ipv4->sin_addr, 4))
 		{
 			printf("[WinProcessProxy][SocksHelper::SplitAddr] Read IPv4 address failed: %d\n", WSAGetLastError());
 			return false;
 		}
 
-		if (recv(client, (char*)&ipv4->sin_port, 2, 0) != 2)
+		if (!ReceiveAll(client, (char*)&ipv4->sin_port, 2))
 		{
 			printf("[WinProcessProxy][SocksHelper::SplitAddr] Read IPv4 port failed: %d\n", WSAGetLastError());
 			return false;
@@ -154,17 +185,32 @@ bool SocksHelper::SplitAddr(SOCKET client, PSOCKADDR_IN6 addr)
 	{
 		addr->sin6_family = AF_INET6;
 
-		if (recv(client, (char*)&addr->sin6_addr, 16, 0) != 16)
+		if (!ReceiveAll(client, (char*)&addr->sin6_addr, 16))
 		{
 			printf("[WinProcessProxy][SocksHelper::SplitAddr] Read IPv6 address failed: %d\n", WSAGetLastError());
 			return false;
 		}
 
-		if (recv(client, (char*)&addr->sin6_port, 2, 0) != 2)
+		if (!ReceiveAll(client, (char*)&addr->sin6_port, 2))
 		{
 			printf("[WinProcessProxy][SocksHelper::SplitAddr] Read IPv6 port failed: %d\n", WSAGetLastError());
 			return false;
 		}
+	}
+	else if (addrType == 0x03)
+	{
+		BYTE length = 0;
+		char host[256];
+		USHORT port = 0;
+		if (!ReceiveAll(client, (char*)&length, 1) || length == 0 ||
+			!ReceiveAll(client, host, length) || !ReceiveAll(client, (char*)&port, 2))
+		{
+			printf("[WinProcessProxy][SocksHelper::SplitAddr] Read domain address failed: %d\n", WSAGetLastError());
+			return false;
+		}
+		UNREFERENCED_PARAMETER(host);
+		UNREFERENCED_PARAMETER(port);
+		addr->sin6_family = AF_UNSPEC;
 	}
 	else
 	{
@@ -207,7 +253,7 @@ bool SocksHelper::TCP::Connect(PSOCKADDR_IN6 target)
 		memcpy(buffer + 4, &addr->sin_addr, 4);
 		memcpy(buffer + 8, &addr->sin_port, 2);
 
-		if (send(this->tcpSocket, buffer, 10, 0) != 10)
+		if (!SendAll(this->tcpSocket, buffer, 10))
 		{
 			printf("[WinProcessProxy][SocksHelper::TCP::Connect] Send connect request failed: %d\n", WSAGetLastError());
 			return false;
@@ -225,7 +271,7 @@ bool SocksHelper::TCP::Connect(PSOCKADDR_IN6 target)
 		memcpy(buffer + 4, &addr->sin6_addr, 16);
 		memcpy(buffer + 20, &addr->sin6_port, 2);
 
-		if (send(this->tcpSocket, buffer, sizeof(buffer), 0) != sizeof(buffer))
+		if (!SendAll(this->tcpSocket, buffer, sizeof(buffer)))
 		{
 			printf("[WinProcessProxy][SocksHelper::TCP::Connect] Send connect request failed: %d\n", WSAGetLastError());
 			return false;
@@ -234,23 +280,64 @@ bool SocksHelper::TCP::Connect(PSOCKADDR_IN6 target)
 
 	/* Server Response */
 	char buffer[3];
-	if (recv(this->tcpSocket, buffer, 3, 0) != 3)
+	if (!ReceiveAll(this->tcpSocket, buffer, 3))
 	{
 		printf("[WinProcessProxy][SocksHelper::TCP::Connect] Receive server response failed: %d\n", WSAGetLastError());
 		return false;
 	}
 
-	if (buffer[1] != 0x00)
+	if ((BYTE)buffer[0] != 0x05 || buffer[1] != 0x00 || buffer[2] != 0x00)
 		return false;
 
 	SOCKADDR_IN6 addr;
 	return SocksHelper::SplitAddr(this->tcpSocket, &addr);
 }
 
+bool SocksHelper::TCP::Connect(const string& host, USHORT port)
+{
+	if (host.empty() || host.length() > 255)
+		return false;
+
+	this->tcpSocket = SocksHelper::Connect();
+	if (this->tcpSocket == INVALID_SOCKET || !SocksHelper::Handshake(this->tcpSocket))
+		return false;
+
+	vector<char> request(7 + host.length());
+	request[0] = 0x05;
+	request[1] = 0x01;
+	request[2] = 0x00;
+	request[3] = 0x03;
+	request[4] = (char)host.length();
+	memcpy(request.data() + 5, host.data(), host.length());
+	memcpy(request.data() + 5 + host.length(), &port, 2);
+
+	if (!SendAll(this->tcpSocket, request.data(), (int)request.size()))
+	{
+		printf("[WinProcessProxy][SocksHelper::TCP::Connect] Send domain connect request failed: %d\n", WSAGetLastError());
+		return false;
+	}
+
+	char response[3];
+	if (!ReceiveAll(this->tcpSocket, response, 3))
+	{
+		printf("[WinProcessProxy][SocksHelper::TCP::Connect] Receive domain connect response failed: %d\n", WSAGetLastError());
+		return false;
+	}
+
+	if ((BYTE)response[0] != 0x05 || response[1] != 0x00 || response[2] != 0x00)
+	{
+		printf("[WinProcessProxy][SocksHelper::TCP::Connect] Domain connect failed: %d\n", (BYTE)response[1]);
+		return false;
+	}
+
+	SOCKADDR_IN6 addr{};
+	return SocksHelper::SplitAddr(this->tcpSocket, &addr);
+}
+
 int SocksHelper::TCP::Send(const char* buffer, int length)
 {
-	if (this->tcpSocket != INVALID_SOCKET)
-		return send(this->tcpSocket, buffer, length, 0);
+	if (this->tcpSocket != INVALID_SOCKET && SendAll(this->tcpSocket, buffer, length))
+		return length;
 
 	return SOCKET_ERROR;
 }

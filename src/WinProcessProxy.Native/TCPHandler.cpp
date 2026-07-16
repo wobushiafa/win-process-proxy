@@ -1,5 +1,140 @@
 #include "TCPHandler.h"
 
+namespace
+{
+	bool ReadUInt16(const vector<BYTE>& data, size_t offset, USHORT& value)
+	{
+		if (offset + 2 > data.size())
+			return false;
+		value = ((USHORT)data[offset] << 8) | data[offset + 1];
+		return true;
+	}
+
+	string ParseTlsServerName(const vector<BYTE>& data)
+	{
+		USHORT recordLength = 0;
+		if (data.size() < 9 || data[0] != 0x16 || data[5] != 0x01 ||
+			!ReadUInt16(data, 3, recordLength) || data.size() < 5 + recordLength)
+			return {};
+		size_t recordEnd = 5 + recordLength;
+
+		size_t offset = 9 + 2 + 32;
+		if (offset >= recordEnd)
+			return {};
+		offset += 1 + data[offset];
+
+		USHORT length = 0;
+		if (offset + 2 > recordEnd || !ReadUInt16(data, offset, length))
+			return {};
+		offset += 2 + length;
+		if (offset >= recordEnd)
+			return {};
+		offset += 1 + data[offset];
+
+		USHORT extensionsLength = 0;
+		if (offset + 2 > recordEnd || !ReadUInt16(data, offset, extensionsLength))
+			return {};
+		offset += 2;
+		size_t extensionsEnd = offset + extensionsLength;
+		if (extensionsEnd > recordEnd)
+			return {};
+
+		while (offset + 4 <= extensionsEnd)
+		{
+			USHORT type = 0;
+			USHORT extensionLength = 0;
+			ReadUInt16(data, offset, type);
+			ReadUInt16(data, offset + 2, extensionLength);
+			offset += 4;
+			if (offset + extensionLength > extensionsEnd)
+				return {};
+
+			if (type == 0x0000 && extensionLength >= 5)
+			{
+				USHORT listLength = 0;
+				if (!ReadUInt16(data, offset, listLength) || offset + 2 + listLength > extensionsEnd)
+					return {};
+
+				size_t nameOffset = offset + 2;
+				size_t listEnd = nameOffset + listLength;
+				while (nameOffset + 3 <= listEnd)
+				{
+					BYTE nameType = data[nameOffset];
+					USHORT nameLength = 0;
+					if (!ReadUInt16(data, nameOffset + 1, nameLength) || nameOffset + 3 + nameLength > listEnd)
+						return {};
+					if (nameType == 0 && nameLength != 0 && nameLength <= 253)
+					{
+						string host((const char*)data.data() + nameOffset + 3, nameLength);
+						if (host.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-") == string::npos)
+							return host;
+					}
+					nameOffset += 3 + nameLength;
+				}
+			}
+
+			offset += extensionLength;
+		}
+
+		return {};
+	}
+
+	string PeekTlsServerName(SOCKET client)
+	{
+		auto deadline = chrono::steady_clock::now() + chrono::milliseconds(350);
+		vector<BYTE> data(65536);
+
+		while (chrono::steady_clock::now() < deadline)
+		{
+			fd_set sockets;
+			FD_ZERO(&sockets);
+			FD_SET(client, &sockets);
+			timeval timeout{ 0, 50000 };
+			int selected = select(0, &sockets, NULL, NULL, &timeout);
+			if (selected == SOCKET_ERROR)
+				return {};
+			if (selected == 0)
+				continue;
+
+			int length = recv(client, (char*)data.data(), (int)data.size(), MSG_PEEK);
+			if (length == 0 || length == SOCKET_ERROR)
+				return {};
+			vector<BYTE> available(data.begin(), data.begin() + length);
+			auto serverName = ParseTlsServerName(available);
+			if (!serverName.empty())
+				return serverName;
+
+			if (length >= 5 && data[0] == 0x16)
+			{
+				USHORT recordLength = ((USHORT)data[3] << 8) | data[4];
+				if (length >= 5 + recordLength)
+					return {};
+			}
+			else
+			{
+				return {};
+			}
+
+			this_thread::sleep_for(chrono::milliseconds(5));
+		}
+
+		return {};
+	}
+
+	bool SendAll(SOCKET socket, const char* buffer, int length)
+	{
+		int sent = 0;
+		while (sent < length)
+		{
+			int result = send(socket, buffer + sent, length - sent, 0);
+			if (result == 0 || result == SOCKET_ERROR)
+				return false;
+			sent += result;
+		}
+		return true;
+	}
+}
+
 SOCKET tcpSocket = INVALID_SOCKET;
 USHORT tcpListen = 0;
 
@@ -160,7 +295,12 @@ void TCPHandler::Handle(SOCKET client)
 	tcpLock.unlock();
 
 	auto remote = new SocksHelper::TCP();
-	if (!remote->Connect(&target))
+	auto port = (target.sin6_family == AF_INET) ? ((PSOCKADDR_IN)&target)->sin_port : target.sin6_port;
+	auto serverName = (ntohs(port) == 443) ? PeekTlsServerName(client) : string{};
+	if (!serverName.empty())
+		printf("[WinProcessProxy][TCPHandler::Handle] SOCKS5 domain target: %s:%u\n", serverName.c_str(), ntohs(port));
+	bool connected = serverName.empty() ? remote->Connect(&target) : remote->Connect(serverName, port);
+	if (!connected)
 	{
 		closesocket(client);
 
@@ -168,8 +308,10 @@ void TCPHandler::Handle(SOCKET client)
 		return;
 	}
 
-	thread(TCPHandler::Send, client, remote).detach();
+	thread sender(TCPHandler::Send, client, remote);
 	TCPHandler::Read(client, remote);
+	shutdown(client, SD_BOTH);
+	sender.join();
 
 	closesocket(client);
 	delete remote;
@@ -185,7 +327,7 @@ void TCPHandler::Read(SOCKET client, SocksHelper::PTCP remote)
 		if (length == 0 || length == SOCKET_ERROR)
 			return;
 
-		if (send(client, buffer, length, 0) != length)
+		if (!SendAll(client, buffer, length))
 			return;
 	}
 }
