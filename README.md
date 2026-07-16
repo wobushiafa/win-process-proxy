@@ -272,24 +272,6 @@ WinProcessProxy.Native.dll
 WinProcessProxy.Service.exe
 ```
 
-## 发布 GitHub Release
-
-仓库内置 GitHub Actions 发布流程。推送语义化版本标签即可自动构建、测试、打包并创建 Release：
-
-```powershell
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-发布产物：
-
-```text
-WinProcessProxy-1.0.0-win-x64.zip
-WinProcessProxy-1.0.0-win-x64.zip.sha256
-```
-
-`v1.0.0-beta.1` 等带后缀的版本会自动标记为 Pre-release，也可以在 GitHub Actions 页面手动触发发布。
-
 ## 注意事项
 
 - 本项目仅支持 Windows x64。
