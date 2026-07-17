@@ -46,4 +46,5 @@ last working native configuration is restored.
 
 Runtime log messages use review-friendly tags: `[APP]`, `[TCP:OPEN]`,
 `[TCP:CLOSE]`, `[TCP:DOMAIN]`, `[TCP:IP-FALLBACK]`, `[TCP:DOMAIN-FAIL]`,
-`[UDP:OPEN]`, `[UDP:CLOSE]`, `[DNS]`, and `[CONFIG]`.
+`[DNS]`, and `[CONFIG]`. `[UDP:OPEN]` and `[UDP:CLOSE]` remain available at
+the Debug log level.

@@ -195,13 +195,13 @@ listeners:
 [APP]
 [TCP:OPEN]
 [TCP:CLOSE]
-[UDP:OPEN]
-[UDP:CLOSE]
 [DNS]
 [CONFIG]
 ```
 
-这些日志可用于确认某个进程是否被识别、连接是否进入 SOCKS5，以及配置热更新是否成功。
+`[UDP:OPEN]` 和 `[UDP:CLOSE]` 属于 Debug 级别，默认不输出，避免浏览器和
+Codex 的短 UDP 流量淹没关键日志。这些日志可用于确认某个进程是否被识别、连接是否进入
+SOCKS5，以及配置热更新是否成功。
 
 ## 从源码构建
 

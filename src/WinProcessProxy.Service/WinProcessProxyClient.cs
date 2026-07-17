@@ -106,11 +106,22 @@ internal sealed class WinProcessProxyClient : IDisposable
                 _ => "[NATIVE]"
             };
 
-            applicationLogger?.LogInformation(
-                "{Tag} {Message} (PID {ProcessId})",
-                tag,
-                new string(message),
-                processId);
+            if (eventType is 4 or 5)
+            {
+                applicationLogger?.LogDebug(
+                    "{Tag} {Message} (PID {ProcessId})",
+                    tag,
+                    new string(message),
+                    processId);
+            }
+            else
+            {
+                applicationLogger?.LogInformation(
+                    "{Tag} {Message} (PID {ProcessId})",
+                    tag,
+                    new string(message),
+                    processId);
+            }
         }
         catch
         {

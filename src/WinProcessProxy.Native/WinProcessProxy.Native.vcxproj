@@ -46,7 +46,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
     <OutDir>$(ProjectDir)bin\$(Configuration)\</OutDir>
-    <IntDir>$(ProjectDir)obj\$(Configuration)\</IntDir>
+    <IntDir>$(ProjectDir)obj\$(ProjectName)\$(Configuration)\$(Platform)\</IntDir>
     <TargetName>WinProcessProxy.Native</TargetName>
     <TargetExt>.dll</TargetExt>
     <IncludePath>$(ProjectDir)include\;$(IncludePath)</IncludePath>
@@ -55,7 +55,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(ProjectDir)bin\$(Configuration)\</OutDir>
-    <IntDir>$(ProjectDir)obj\$(Configuration)\</IntDir>
+    <IntDir>$(ProjectDir)obj\$(ProjectName)\$(Configuration)\$(Platform)\</IntDir>
     <TargetName>WinProcessProxy.Native</TargetName>
     <TargetExt>.dll</TargetExt>
     <IncludePath>$(ProjectDir)include\;$(IncludePath)</IncludePath>

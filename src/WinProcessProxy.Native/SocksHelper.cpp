@@ -35,11 +35,6 @@ namespace
 		return true;
 	}
 
-	bool SetSocketTimeout(SOCKET socket, DWORD milliseconds)
-	{
-		return setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&milliseconds, sizeof(milliseconds)) != SOCKET_ERROR &&
-			setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, (const char*)&milliseconds, sizeof(milliseconds)) != SOCKET_ERROR;
-	}
 }
 
 SOCKET SocksHelper::Connect()
@@ -72,13 +67,6 @@ SOCKET SocksHelper::Connect()
 		closesocket(client);
 		return INVALID_SOCKET;
 	}
-	if (!SetSocketTimeout(client, 4000))
-	{
-		printf("[WinProcessProxy][SocksHelper::Connect] Set negotiation timeout failed: %d\n", WSAGetLastError());
-		closesocket(client);
-		return INVALID_SOCKET;
-	}
-
 	{
 		DWORD returned = 0;
 
@@ -235,34 +223,20 @@ bool SocksHelper::SplitAddr(SOCKET client, PSOCKADDR_IN6 addr)
 
 SocksHelper::TCP::~TCP()
 {
-	this->Close();
-}
-
-void SocksHelper::TCP::Close()
-{
-	auto socket = this->tcpSocket.exchange(INVALID_SOCKET);
-	if (socket != INVALID_SOCKET)
+	if (this->tcpSocket != INVALID_SOCKET)
 	{
-		shutdown(socket, SD_BOTH);
-		closesocket(socket);
+		closesocket(this->tcpSocket);
+		this->tcpSocket = INVALID_SOCKET;
 	}
-}
-
-void SocksHelper::TCP::ShutdownSend()
-{
-	auto socket = this->tcpSocket.load();
-	if (socket != INVALID_SOCKET)
-		shutdown(socket, SD_SEND);
 }
 
 bool SocksHelper::TCP::Connect(PSOCKADDR_IN6 target)
 {
-	this->tcpSocket.store(SocksHelper::Connect());
-	auto socket = this->tcpSocket.load();
-	if (socket == INVALID_SOCKET)
+	this->tcpSocket = SocksHelper::Connect();
+	if (this->tcpSocket == INVALID_SOCKET)
 		return false;
 
-	if (!SocksHelper::Handshake(socket))
+	if (!SocksHelper::Handshake(this->tcpSocket))
 		return false;
 
 	/* Connect Request */
@@ -278,7 +252,7 @@ bool SocksHelper::TCP::Connect(PSOCKADDR_IN6 target)
 		memcpy(buffer + 4, &addr->sin_addr, 4);
 		memcpy(buffer + 8, &addr->sin_port, 2);
 
-		if (!SendAll(socket, buffer, 10))
+		if (!SendAll(this->tcpSocket, buffer, 10))
 		{
 			printf("[WinProcessProxy][SocksHelper::TCP::Connect] Send connect request failed: %d\n", WSAGetLastError());
 			return false;
@@ -296,7 +270,7 @@ bool SocksHelper::TCP::Connect(PSOCKADDR_IN6 target)
 		memcpy(buffer + 4, &addr->sin6_addr, 16);
 		memcpy(buffer + 20, &addr->sin6_port, 2);
 
-		if (!SendAll(socket, buffer, sizeof(buffer)))
+		if (!SendAll(this->tcpSocket, buffer, sizeof(buffer)))
 		{
 			printf("[WinProcessProxy][SocksHelper::TCP::Connect] Send connect request failed: %d\n", WSAGetLastError());
 			return false;
@@ -305,7 +279,7 @@ bool SocksHelper::TCP::Connect(PSOCKADDR_IN6 target)
 
 	/* Server Response */
 	char buffer[3];
-	if (!ReceiveAll(socket, buffer, 3))
+	if (!ReceiveAll(this->tcpSocket, buffer, 3))
 	{
 		printf("[WinProcessProxy][SocksHelper::TCP::Connect] Receive server response failed: %d\n", WSAGetLastError());
 		return false;
@@ -315,9 +289,7 @@ bool SocksHelper::TCP::Connect(PSOCKADDR_IN6 target)
 		return false;
 
 	SOCKADDR_IN6 addr;
-	if (!SocksHelper::SplitAddr(socket, &addr))
-		return false;
-	return SetSocketTimeout(socket, 0);
+	return SocksHelper::SplitAddr(this->tcpSocket, &addr);
 }
 
 bool SocksHelper::TCP::Connect(const string& host, USHORT port)
@@ -325,9 +297,8 @@ bool SocksHelper::TCP::Connect(const string& host, USHORT port)
 	if (host.empty() || host.length() > 255)
 		return false;
 
-	this->tcpSocket.store(SocksHelper::Connect());
-	auto socket = this->tcpSocket.load();
-	if (socket == INVALID_SOCKET || !SocksHelper::Handshake(socket))
+	this->tcpSocket = SocksHelper::Connect();
+	if (this->tcpSocket == INVALID_SOCKET || !SocksHelper::Handshake(this->tcpSocket))
 		return false;
 
 	vector<char> request(7 + host.length());
@@ -339,14 +310,14 @@ bool SocksHelper::TCP::Connect(const string& host, USHORT port)
 	memcpy(request.data() + 5, host.data(), host.length());
 	memcpy(request.data() + 5 + host.length(), &port, 2);
 
-	if (!SendAll(socket, request.data(), (int)request.size()))
+	if (!SendAll(this->tcpSocket, request.data(), (int)request.size()))
 	{
 		printf("[WinProcessProxy][SocksHelper::TCP::Connect] Send domain connect request failed: %d\n", WSAGetLastError());
 		return false;
 	}
 
 	char response[3];
-	if (!ReceiveAll(socket, response, 3))
+	if (!ReceiveAll(this->tcpSocket, response, 3))
 	{
 		printf("[WinProcessProxy][SocksHelper::TCP::Connect] Receive domain connect response failed: %d\n", WSAGetLastError());
 		return false;
@@ -359,15 +330,12 @@ bool SocksHelper::TCP::Connect(const string& host, USHORT port)
 	}
 
 	SOCKADDR_IN6 addr{};
-	if (!SocksHelper::SplitAddr(socket, &addr))
-		return false;
-	return SetSocketTimeout(socket, 0);
+	return SocksHelper::SplitAddr(this->tcpSocket, &addr);
 }
 
 int SocksHelper::TCP::Send(const char* buffer, int length)
 {
-	auto socket = this->tcpSocket.load();
-	if (socket != INVALID_SOCKET && SendAll(socket, buffer, length))
+	if (this->tcpSocket != INVALID_SOCKET && SendAll(this->tcpSocket, buffer, length))
 		return length;
 
 	return SOCKET_ERROR;
@@ -375,9 +343,8 @@ int SocksHelper::TCP::Send(const char* buffer, int length)
 
 int SocksHelper::TCP::Read(char* buffer, int length)
 {
-	auto socket = this->tcpSocket.load();
-	if (socket != INVALID_SOCKET)
-		return recv(socket, buffer, length, 0);
+	if (this->tcpSocket != INVALID_SOCKET)
+		return recv(this->tcpSocket, buffer, length, 0);
 
 	return SOCKET_ERROR;
 }
@@ -468,12 +435,6 @@ bool SocksHelper::UDP::Associate()
 		closesocket(client);
 		return false;
 	}
-	if (!SetSocketTimeout(client, 0))
-	{
-		closesocket(client);
-		return false;
-	}
-
 	this->tcpSocket.store(client);
 	return true;
 }

@@ -75,9 +75,6 @@ SOCKET tcpSocket = INVALID_SOCKET;
 USHORT tcpListen = 0;
 
 mutex tcpLock;
-mutex activeTcpLock;
-set<SOCKET> activeClients;
-set<SocksHelper::PTCP> activeRemotes;
 struct TCP_CONTEXT
 {
 	SOCKADDR_IN6 target;
@@ -169,11 +166,6 @@ void TCPHandler::FREE()
 
 	tcpContext.clear();
 
-	lock_guard<mutex> activeGuard(activeTcpLock);
-	for (auto client : activeClients)
-		shutdown(client, SD_BOTH);
-	for (auto remote : activeRemotes)
-		remote->Close();
 }
 
 void TCPHandler::CreateHandler(SOCKADDR_IN6 client, SOCKADDR_IN6 remote, DWORD processId)
@@ -246,11 +238,6 @@ void TCPHandler::Handle(SOCKET client)
 	auto target = context.target;
 
 	auto remote = new SocksHelper::TCP();
-	{
-		lock_guard<mutex> activeGuard(activeTcpLock);
-		activeClients.emplace(client);
-		activeRemotes.emplace(remote);
-	}
 	auto port = (target.sin6_family == AF_INET) ? ((PSOCKADDR_IN)&target)->sin_port : target.sin6_port;
 	auto serverName = (ntohs(port) == 443) ? PeekTlsServerName(client) : string{};
 	if (!serverName.empty())
@@ -278,11 +265,6 @@ void TCPHandler::Handle(SOCKET client)
 				context.processId,
 				s2ws(serverName) + L":" + to_wstring(ntohs(port)));
 		}
-		{
-			lock_guard<mutex> activeGuard(activeTcpLock);
-			activeClients.erase(client);
-			activeRemotes.erase(remote);
-		}
 		closesocket(client);
 		delete remote;
 		return;
@@ -293,11 +275,6 @@ void TCPHandler::Handle(SOCKET client)
 	shutdown(client, SD_BOTH);
 	sender.join();
 
-	{
-		lock_guard<mutex> activeGuard(activeTcpLock);
-		activeClients.erase(client);
-		activeRemotes.erase(remote);
-	}
 	closesocket(client);
 	delete remote;
 }
@@ -324,21 +301,10 @@ void TCPHandler::Send(SOCKET client, SocksHelper::PTCP remote)
 	while (tcpSocket != INVALID_SOCKET)
 	{
 		int length = recv(client, buffer, sizeof(buffer), 0);
-		if (length == 0)
-		{
-			remote->ShutdownSend();
+		if (length == 0 || length == SOCKET_ERROR)
 			return;
-		}
-		if (length == SOCKET_ERROR)
-		{
-			remote->Close();
-			return;
-		}
 
 		if (remote->Send(buffer, length) != length)
-		{
-			remote->Close();
 			return;
-		}
 	}
 }
