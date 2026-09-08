@@ -56,7 +56,7 @@ NF_IPEventHandler IPEventHandler = {
 	ipSend
 };
 
-constexpr auto DriverServiceName = "netfilter2";
+constexpr auto DriverServiceName = "nfdriver";
 
 bool EnsureDriverInstalled()
 {
@@ -237,7 +237,7 @@ extern "C" {
 			return FALSE;
 		}
 
-		if (nf_init("netfilter2", &EventHandler) != NF_STATUS_SUCCESS)
+		if (nf_init(DriverServiceName, &EventHandler) != NF_STATUS_SUCCESS)
 		{
 			puts("[WinProcessProxy][aio_init] nf_init != NF_STATUS_SUCCESS");
 			eh_free();
