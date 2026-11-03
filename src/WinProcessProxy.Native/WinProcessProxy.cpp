@@ -57,6 +57,135 @@ NF_IPEventHandler IPEventHandler = {
 };
 
 constexpr auto DriverServiceName = "nfdriver";
+constexpr auto LegacyDriverServiceName = "netfilter2";
+constexpr auto DriverFileName = L"nfdriver.sys";
+constexpr auto LegacyDriverFileName = L"netfilter2.sys";
+HMODULE nativeModule = nullptr;
+
+wstring GetModuleDirectory(HMODULE module)
+{
+	wchar_t buffer[MAX_PATH] = {};
+	DWORD length = GetModuleFileNameW(module, buffer, MAX_PATH);
+	if (length == 0 || length >= MAX_PATH)
+		return L"";
+
+	wstring fullPath(buffer, length);
+	auto separator = fullPath.find_last_of(L"\\/");
+	return separator == wstring::npos ? L"" : fullPath.substr(0, separator);
+}
+
+wstring ResolveBundledDriverPath()
+{
+	HMODULE module = nativeModule;
+	if (module == nullptr)
+	{
+		GetModuleHandleExW(
+			GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			reinterpret_cast<LPCWSTR>(&ResolveBundledDriverPath),
+			&module);
+	}
+
+	auto moduleDir = GetModuleDirectory(module);
+	if (!moduleDir.empty())
+	{
+		auto candidate = moduleDir + L"\\" + DriverFileName;
+		if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES)
+			return candidate;
+	}
+
+	auto exeDir = GetModuleDirectory(nullptr);
+	if (!exeDir.empty())
+	{
+		auto candidate = exeDir + L"\\" + DriverFileName;
+		if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES)
+			return candidate;
+	}
+
+	return L"";
+}
+
+wstring GetSystemDriverPath(const wchar_t* driverFileName = DriverFileName)
+{
+	wchar_t systemDir[MAX_PATH] = {};
+	UINT length = GetSystemDirectoryW(systemDir, MAX_PATH);
+	if (length == 0 || length >= MAX_PATH)
+		return L"";
+
+	return wstring(systemDir, length) + L"\\drivers\\" + driverFileName;
+}
+
+void CleanupOrphanedLegacyDriver(SC_HANDLE manager)
+{
+	auto legacyDriverPath = GetSystemDriverPath(LegacyDriverFileName);
+	if (!legacyDriverPath.empty() && GetFileAttributesW(legacyDriverPath.c_str()) != INVALID_FILE_ATTRIBUTES)
+		return;
+
+	auto legacyService = OpenServiceA(manager, LegacyDriverServiceName, SERVICE_QUERY_STATUS);
+	if (legacyService == nullptr)
+		return;
+
+	SERVICE_STATUS serviceStatus = {};
+	bool running = QueryServiceStatus(legacyService, &serviceStatus) &&
+		serviceStatus.dwCurrentState == SERVICE_RUNNING;
+	CloseServiceHandle(legacyService);
+
+	if (!running)
+		nf_unRegisterDriver(LegacyDriverServiceName);
+}
+
+bool TryGetFileSize(const wstring& path, ULONGLONG& size)
+{
+	WIN32_FILE_ATTRIBUTE_DATA data = {};
+	if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data))
+		return false;
+
+	if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+		return false;
+
+	ULARGE_INTEGER fileSize = {};
+	fileSize.HighPart = data.nFileSizeHigh;
+	fileSize.LowPart = data.nFileSizeLow;
+	size = fileSize.QuadPart;
+	return true;
+}
+
+bool EnsureDriverBinaryDeployed(bool driverRunning)
+{
+	auto systemDriverPath = GetSystemDriverPath();
+	if (systemDriverPath.empty())
+	{
+		printf("[WinProcessProxy][driver] GetSystemDirectoryW failed: %lu\n", GetLastError());
+		return false;
+	}
+
+	ULONGLONG targetSize = 0;
+	bool targetExists = TryGetFileSize(systemDriverPath, targetSize);
+
+	auto bundledDriverPath = ResolveBundledDriverPath();
+	ULONGLONG sourceSize = 0;
+	bool sourceExists = !bundledDriverPath.empty() && TryGetFileSize(bundledDriverPath, sourceSize);
+
+	if (targetExists && (driverRunning || !sourceExists || sourceSize == targetSize))
+		return true;
+
+	if (!sourceExists)
+	{
+		printf("[WinProcessProxy][driver] Bundled nfdriver.sys not found and %ls is missing.\n", systemDriverPath.c_str());
+		return false;
+	}
+
+	if (!CopyFileW(bundledDriverPath.c_str(), systemDriverPath.c_str(), FALSE))
+	{
+		auto error = GetLastError();
+		if (targetExists)
+			return true;
+
+		printf("[WinProcessProxy][driver] CopyFileW to %ls failed: %lu\n", systemDriverPath.c_str(), error);
+		return false;
+	}
+
+	return true;
+}
 
 bool EnsureDriverInstalled()
 {
@@ -67,23 +196,45 @@ bool EnsureDriverInstalled()
 		return false;
 	}
 
+	bool serviceExists = false;
+	bool serviceRunning = false;
+	CleanupOrphanedLegacyDriver(manager);
 	auto service = OpenServiceA(manager, DriverServiceName, SERVICE_QUERY_STATUS);
 	if (service != nullptr)
 	{
+		serviceExists = true;
+		SERVICE_STATUS serviceStatus = {};
+		if (QueryServiceStatus(service, &serviceStatus))
+			serviceRunning = (serviceStatus.dwCurrentState == SERVICE_RUNNING);
+
 		CloseServiceHandle(service);
-		CloseServiceHandle(manager);
-		return true;
+	}
+	else
+	{
+		auto error = GetLastError();
+		if (error != ERROR_SERVICE_DOES_NOT_EXIST)
+		{
+			CloseServiceHandle(manager);
+			printf("[WinProcessProxy][driver] OpenService failed: %lu\n", error);
+			return false;
+		}
 	}
 
-	auto error = GetLastError();
 	CloseServiceHandle(manager);
-	if (error != ERROR_SERVICE_DOES_NOT_EXIST)
-	{
-		printf("[WinProcessProxy][driver] OpenService failed: %lu\n", error);
+
+	if (!EnsureDriverBinaryDeployed(serviceRunning))
 		return false;
-	}
+
+	if (serviceRunning)
+		return true;
 
 	auto status = nf_registerDriver(DriverServiceName);
+	if (status != NF_STATUS_SUCCESS && serviceExists)
+	{
+		nf_unRegisterDriver(DriverServiceName);
+		status = nf_registerDriver(DriverServiceName);
+	}
+
 	if (status != NF_STATUS_SUCCESS)
 	{
 		printf("[WinProcessProxy][driver] nf_registerDriver failed: %d\n", status);
